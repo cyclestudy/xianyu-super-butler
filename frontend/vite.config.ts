@@ -252,11 +252,10 @@ export default defineConfig(({ command }) => ({
     },
   },
   build: {
-    outDir: '../static',
-    // 不使用 emptyOutDir，避免删除重要文件（如 xianyu_js_version_2.js）
-    // 资源放在 assets 目录
+    outDir: 'dist',
+    emptyOutDir: true,
     assetsDir: 'assets',
   },
-  // 生产环境使用 /static/ 作为 base，确保资源路径正确
-  base: command === 'build' ? '/static/' : '/',
+  // GitHub Pages 使用仓库名作为 base path
+  base: command === 'build' ? '/xianyu-super-butler/' : '/',
 }))
