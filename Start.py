@@ -163,13 +163,25 @@ def _check_and_install_playwright():
         exe_dir = Path(sys.executable).parent
         playwright_dir = exe_dir / 'playwright'
         possible_paths.insert(0, playwright_dir)  # 插入到最前面，优先检查
-        
-        # 检查exe同目录的浏览器是否完整
+
+        # 也检查 _internal 目录（PyInstaller onedir 模式）
+        internal_pw = exe_dir / '_internal' / 'playwright'
+        if internal_pw.exists() and not playwright_dir.exists():
+            playwright_dir = internal_pw
+            possible_paths.insert(0, internal_pw)
+
+        # 检查exe同目录的浏览器是否完整（跨平台）
         if playwright_dir.exists():
             chromium_dirs = list(playwright_dir.glob('chromium-*'))
             if chromium_dirs:
                 chromium_dir = chromium_dirs[0]
-                chrome_exe = chromium_dir / 'chrome-win' / 'chrome.exe'
+                # 跨平台检测浏览器可执行文件
+                if sys.platform == 'win32':
+                    chrome_exe = chromium_dir / 'chrome-win' / 'chrome.exe'
+                elif sys.platform == 'darwin':
+                    chrome_exe = chromium_dir / 'chrome-mac' / 'Chromium.app' / 'Contents' / 'MacOS' / 'Chromium'
+                else:
+                    chrome_exe = chromium_dir / 'chrome-linux' / 'chrome'
                 if chrome_exe.exists() and chrome_exe.stat().st_size > 0:
                     print(f"{_OK} 找到已提取的Playwright浏览器: {chrome_exe}")
                     print(f"{_INFO} 浏览器版本: {chromium_dir.name}")
@@ -185,22 +197,22 @@ def _check_and_install_playwright():
                     playwright_installed = True
                     return True
     
-    # Windows上的常见位置
+    # 常见位置（跨平台）
+    # Linux / macOS
+    user_cache = Path.home() / '.cache' / 'ms-playwright'
+    possible_paths.append(user_cache)
+
     if sys.platform == 'win32':
-        # 用户缓存目录
-        user_cache = Path.home() / '.cache' / 'ms-playwright'
-        possible_paths.append(user_cache)
-        
         # LocalAppData目录
         local_appdata = os.getenv('LOCALAPPDATA')
         if local_appdata:
             possible_paths.append(Path(local_appdata) / 'ms-playwright')
-        
+
         # AppData目录
         appdata = os.getenv('APPDATA')
         if appdata:
             possible_paths.append(Path(appdata) / 'ms-playwright')
-    
+
     # 检查是否存在chromium浏览器
     for path in possible_paths:
         if path.exists():
@@ -208,8 +220,13 @@ def _check_and_install_playwright():
             chromium_dirs = list(path.glob('chromium-*'))
             if chromium_dirs:
                 for chromium_dir in chromium_dirs:
-                    chrome_win = chromium_dir / 'chrome-win'
-                    chrome_exe = chrome_win / 'chrome.exe'
+                    # 跨平台检测浏览器
+                    if sys.platform == 'win32':
+                        chrome_exe = chromium_dir / 'chrome-win' / 'chrome.exe'
+                    elif sys.platform == 'darwin':
+                        chrome_exe = chromium_dir / 'chrome-mac' / 'Chromium.app' / 'Contents' / 'MacOS' / 'Chromium'
+                    else:
+                        chrome_exe = chromium_dir / 'chrome-linux' / 'chrome'
                     if chrome_exe.exists():
                         print(f"{_OK} 找到Playwright浏览器: {chrome_exe}")
                         # 设置环境变量
@@ -253,33 +270,50 @@ def _check_and_install_playwright():
                         extracted_count = 0
                         
                         for temp_chromium_dir in temp_chromium_dirs:
-                            temp_chrome_win = temp_chromium_dir / 'chrome-win'
-                            
+                            # 跨平台检测浏览器可执行文件
+                            if sys.platform == 'win32':
+                                chrome_subdir = 'chrome-win'
+                                chrome_name = 'chrome.exe'
+                                headless_name = 'headless_shell.exe'
+                            elif sys.platform == 'darwin':
+                                chrome_subdir = 'chrome-mac'
+                                chrome_name = 'Chromium.app/Contents/MacOS/Chromium'
+                                headless_name = 'headless_shell'
+                            else:
+                                chrome_subdir = 'chrome-linux'
+                                chrome_name = 'chrome'
+                                headless_name = 'headless_shell'
+
+                            temp_chrome_dir = temp_chromium_dir / chrome_subdir
+
                             # 检查完整版或 headless_shell 版
-                            temp_chrome_exe = temp_chrome_win / 'chrome.exe'
-                            temp_headless_exe = temp_chrome_win / 'headless_shell.exe'
-                            
+                            temp_chrome_exe = temp_chrome_dir / chrome_name
+                            temp_headless_exe = temp_chrome_dir / headless_name
+
                             # 验证文件是否存在
                             is_valid = False
                             if temp_chromium_dir.name.startswith('chromium_headless_shell'):
                                 is_valid = temp_headless_exe.exists() and temp_headless_exe.stat().st_size > 0
                             else:
                                 is_valid = temp_chrome_exe.exists() and temp_chrome_exe.stat().st_size > 0
-                            
+
                             if is_valid:
                                 target_chromium_dir = playwright_dir / temp_chromium_dir.name
-                                
+
                                 if not target_chromium_dir.exists():
                                     try:
                                         shutil.copytree(temp_chromium_dir, target_chromium_dir, dirs_exist_ok=True)
-                                        
+
                                         # 验证提取的文件
                                         if temp_chromium_dir.name.startswith('chromium_headless_shell'):
-                                            target_exe = target_chromium_dir / 'chrome-win' / 'headless_shell.exe'
+                                            target_exe = target_chromium_dir / chrome_subdir / headless_name
                                         else:
-                                            target_exe = target_chromium_dir / 'chrome-win' / 'chrome.exe'
-                                        
+                                            target_exe = target_chromium_dir / chrome_subdir / chrome_name
+
                                         if target_exe.exists() and target_exe.stat().st_size > 0:
+                                            # Linux 下确保可执行权限
+                                            if sys.platform != 'win32':
+                                                os.chmod(str(target_exe), 0o755)
                                             print(f"{_OK} 浏览器文件提取成功: {target_exe}")
                                             print(f"{_INFO} 浏览器版本: {temp_chromium_dir.name}")
                                             extracted_count += 1
