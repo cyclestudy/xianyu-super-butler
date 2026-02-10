@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { MainLayout } from '@/components/layout/MainLayout'
 import { Login } from '@/pages/auth/Login'
@@ -131,7 +131,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
-    <HashRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       {/* 全局 Toast 组件 */}
       <Toast />
       <Routes>
@@ -175,7 +175,7 @@ function App() {
         {/* Catch all */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
-    </HashRouter>
+    </BrowserRouter>
   )
 }
 
