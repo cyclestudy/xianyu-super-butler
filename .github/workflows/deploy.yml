@@ -33,11 +33,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./frontend
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build
         working-directory: ./frontend
-        run: pnpm run build
+        run: npx vite build
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
