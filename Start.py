@@ -157,46 +157,33 @@ def _check_and_install_playwright():
     # 检查Playwright浏览器是否存在
     playwright_installed = False
     possible_paths = []
-    
-    # 如果是打包后的exe，优先检查exe同目录
+
+    # 如果是打包后的二进制，直接设置 PLAYWRIGHT_BROWSERS_PATH
     if getattr(sys, 'frozen', False):
         exe_dir = Path(sys.executable).parent
-        playwright_dir = exe_dir / 'playwright'
-        possible_paths.insert(0, playwright_dir)  # 插入到最前面，优先检查
 
-        # 也检查 _internal 目录（PyInstaller onedir 模式）
+        # PyInstaller onedir 模式：浏览器在 _internal/playwright/
         internal_pw = exe_dir / '_internal' / 'playwright'
-        if internal_pw.exists() and not playwright_dir.exists():
-            playwright_dir = internal_pw
-            possible_paths.insert(0, internal_pw)
+        # 也检查 exe 同目录
+        exe_pw = exe_dir / 'playwright'
 
-        # 检查exe同目录的浏览器是否完整（跨平台）
-        if playwright_dir.exists():
-            chromium_dirs = list(playwright_dir.glob('chromium-*'))
-            if chromium_dirs:
-                chromium_dir = chromium_dirs[0]
-                # 跨平台检测浏览器可执行文件
-                if sys.platform == 'win32':
-                    chrome_exe = chromium_dir / 'chrome-win' / 'chrome.exe'
-                elif sys.platform == 'darwin':
-                    chrome_exe = chromium_dir / 'chrome-mac' / 'Chromium.app' / 'Contents' / 'MacOS' / 'Chromium'
-                else:
-                    chrome_exe = chromium_dir / 'chrome-linux' / 'chrome'
-                if chrome_exe.exists() and chrome_exe.stat().st_size > 0:
-                    print(f"{_OK} 找到已提取的Playwright浏览器: {chrome_exe}")
-                    print(f"{_INFO} 浏览器版本: {chromium_dir.name}")
-                    # 清除可能存在的旧环境变量，使用实际存在的浏览器
-                    if 'PLAYWRIGHT_BROWSERS_PATH' in os.environ:
-                        old_path = os.environ['PLAYWRIGHT_BROWSERS_PATH']
-                        if old_path != str(playwright_dir):
-                            print(f"{_INFO} 清除旧的环境变量: {old_path}")
-                            del os.environ['PLAYWRIGHT_BROWSERS_PATH']
-                    # 确保环境变量已设置
-                    os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(playwright_dir)
-                    print(f"{_INFO} 已设置PLAYWRIGHT_BROWSERS_PATH: {playwright_dir}")
-                    playwright_installed = True
+        for pw_path in [internal_pw, exe_pw]:
+            if pw_path.exists():
+                chromium_dirs = list(pw_path.glob('chromium-*')) + list(pw_path.glob('chromium_*'))
+                if chromium_dirs:
+                    os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(pw_path)
+                    print(f"{_OK} 找到打包的Playwright浏览器目录: {pw_path}")
+                    print(f"{_INFO} 浏览器版本: {', '.join(d.name for d in chromium_dirs)}")
+                    print(f"{_INFO} 已设置PLAYWRIGHT_BROWSERS_PATH: {pw_path}")
+                    # Linux 下确保浏览器文件有可执行权限
+                    if sys.platform != 'win32':
+                        for chromium_dir in chromium_dirs:
+                            for exe_file in chromium_dir.rglob('chrome'):
+                                os.chmod(str(exe_file), 0o755)
+                            for exe_file in chromium_dir.rglob('headless_shell'):
+                                os.chmod(str(exe_file), 0o755)
                     return True
-    
+
     # 常见位置（跨平台）
     # Linux / macOS
     user_cache = Path.home() / '.cache' / 'ms-playwright'
@@ -251,91 +238,13 @@ def _check_and_install_playwright():
         except Exception:
             pass
     
-    # 如果没找到，先尝试从临时目录提取（如果是打包的exe）
+    # 如果没找到，且是打包的二进制，跳过自动安装（在打包环境中无法安装）
     if not playwright_installed and getattr(sys, 'frozen', False):
-        try:
-            exe_dir = Path(sys.executable).parent
-            playwright_dir = exe_dir / 'playwright'
-            
-            if hasattr(sys, '_MEIPASS'):
-                temp_dir = Path(sys._MEIPASS)
-                temp_playwright = temp_dir / 'playwright'
-                
-                if temp_playwright.exists():
-                    # 查找所有 chromium 相关目录（包括 chromium-* 和 chromium_headless_shell-*）
-                    temp_chromium_dirs = list(temp_playwright.glob('chromium*'))
-                    if temp_chromium_dirs:
-                        print(f"{_INFO} 检测到打包的浏览器文件，正在提取...")
-                        playwright_dir.mkdir(parents=True, exist_ok=True)
-                        extracted_count = 0
-                        
-                        for temp_chromium_dir in temp_chromium_dirs:
-                            # 跨平台检测浏览器可执行文件
-                            if sys.platform == 'win32':
-                                chrome_subdir = 'chrome-win'
-                                chrome_name = 'chrome.exe'
-                                headless_name = 'headless_shell.exe'
-                            elif sys.platform == 'darwin':
-                                chrome_subdir = 'chrome-mac'
-                                chrome_name = 'Chromium.app/Contents/MacOS/Chromium'
-                                headless_name = 'headless_shell'
-                            else:
-                                chrome_subdir = 'chrome-linux'
-                                chrome_name = 'chrome'
-                                headless_name = 'headless_shell'
+        print(f"{_WARN} 打包的二进制中未找到Playwright浏览器")
+        print("   请确保构建时已包含Playwright Chromium")
+        return False
 
-                            temp_chrome_dir = temp_chromium_dir / chrome_subdir
-
-                            # 检查完整版或 headless_shell 版
-                            temp_chrome_exe = temp_chrome_dir / chrome_name
-                            temp_headless_exe = temp_chrome_dir / headless_name
-
-                            # 验证文件是否存在
-                            is_valid = False
-                            if temp_chromium_dir.name.startswith('chromium_headless_shell'):
-                                is_valid = temp_headless_exe.exists() and temp_headless_exe.stat().st_size > 0
-                            else:
-                                is_valid = temp_chrome_exe.exists() and temp_chrome_exe.stat().st_size > 0
-
-                            if is_valid:
-                                target_chromium_dir = playwright_dir / temp_chromium_dir.name
-
-                                if not target_chromium_dir.exists():
-                                    try:
-                                        shutil.copytree(temp_chromium_dir, target_chromium_dir, dirs_exist_ok=True)
-
-                                        # 验证提取的文件
-                                        if temp_chromium_dir.name.startswith('chromium_headless_shell'):
-                                            target_exe = target_chromium_dir / chrome_subdir / headless_name
-                                        else:
-                                            target_exe = target_chromium_dir / chrome_subdir / chrome_name
-
-                                        if target_exe.exists() and target_exe.stat().st_size > 0:
-                                            # Linux 下确保可执行权限
-                                            if sys.platform != 'win32':
-                                                os.chmod(str(target_exe), 0o755)
-                                            print(f"{_OK} 浏览器文件提取成功: {target_exe}")
-                                            print(f"{_INFO} 浏览器版本: {temp_chromium_dir.name}")
-                                            extracted_count += 1
-                                    except Exception as e:
-                                        print(f"{_WARN} 提取 {temp_chromium_dir.name} 失败: {e}")
-                        
-                        if extracted_count > 0:
-                            # 清除可能存在的旧环境变量
-                            if 'PLAYWRIGHT_BROWSERS_PATH' in os.environ:
-                                old_path = os.environ['PLAYWRIGHT_BROWSERS_PATH']
-                                print(f"{_INFO} 清除旧的环境变量: {old_path}")
-                                del os.environ['PLAYWRIGHT_BROWSERS_PATH']
-                            # 设置新的环境变量
-                            os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(playwright_dir)
-                            print(f"{_INFO} 已提取 {extracted_count} 个浏览器版本")
-                            print(f"{_INFO} 已设置PLAYWRIGHT_BROWSERS_PATH: {playwright_dir}")
-                            playwright_installed = True
-                            return True
-        except Exception as e:
-            print(f"{_WARN} 提取浏览器文件时出错: {e}")
-    
-    # 如果没找到，尝试安装
+    # 如果没找到，尝试安装（仅非打包环境）
     if not playwright_installed:
         print(f"{_WARN} 未找到Playwright浏览器，正在自动安装...")
         print("   这可能需要几分钟时间，请耐心等待...")
